@@ -3,7 +3,7 @@ use gio::glib::subclass::Signal;
 use gtk4::prelude::{GestureSingleExt, WidgetExt};
 use gtk4::subclass::prelude::*;
 use gtk4::{glib, GestureClick};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::sync::OnceLock;
 
 // SHERLOCK ROW
@@ -12,6 +12,7 @@ use std::sync::OnceLock;
 pub struct SherlockRow {
     pub spawn_focus: Cell<bool>,
     pub shortcut: Cell<bool>,
+    pub search: RefCell<String>,
 }
 
 // The central trait for subclassing a GObject

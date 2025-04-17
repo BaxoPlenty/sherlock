@@ -70,6 +70,9 @@ pub struct ResultItem {
     pub priority: f32,
     pub row_item: SherlockRow,
     pub shortcut_holder: Option<Box>,
+    pub alias: Option<String>,
+    pub home: bool,
+    pub only_home: bool,
 }
 
 impl Launcher {
@@ -128,7 +131,7 @@ impl Launcher {
             _ => None,
         }
     }
-    pub fn get_loader_widget(self, keyword: &str) -> Option<AsyncLauncherTile> {
+    pub fn get_loader_widget(self, keyword: &str) -> Option<(AsyncLauncherTile, ResultItem)> {
         match self.launcher_type.clone() {
             LauncherType::BulkText(bulk_text) => {
                 Tile::bulk_text_tile_loader(self, keyword, &bulk_text)
@@ -156,22 +159,4 @@ impl Launcher {
             _ => None,
         }
     }
-}
-
-pub fn construct_tiles(keyword: &str, launchers: &[Launcher], mode: &str) -> Vec<ResultItem> {
-    let mut results = Vec::new();
-    let sel_mode = mode.trim();
-    for launcher in launchers.iter() {
-        let alias = launcher.alias.as_deref().unwrap_or("all");
-
-        if launcher.priority == 0 && alias != sel_mode {
-            continue;
-        }
-
-        if alias == sel_mode || sel_mode == "all" {
-            let result = launcher.get_patch(keyword);
-            results.extend(result);
-        }
-    }
-    results
 }

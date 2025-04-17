@@ -13,7 +13,7 @@ impl Tile {
     pub fn mpris_tile(
         launcher: Launcher,
         mpris: &MusicPlayerLauncher,
-    ) -> Option<AsyncLauncherTile> {
+    ) -> Option<(AsyncLauncherTile, ResultItem)> {
         let builder = TileBuilder::new("/dev/skxxtz/sherlock/ui/mpris_tile.ui");
         builder.object.add_css_class("mpris-tile");
         builder.object.set_spawn_focus(launcher.spawn_focus);
@@ -26,7 +26,6 @@ impl Tile {
         builder.object.set_overflow(gtk4::Overflow::Hidden);
 
         let overlay = Overlay::new();
-        let mut options = ImageReplacementElements::new();
 
         builder.icon.set_visible(false);
 
@@ -71,17 +70,20 @@ impl Tile {
             priority: launcher.priority as f32,
             row_item: builder.object,
             shortcut_holder,
+            alias: launcher.alias.clone(),
+            home: launcher.home,
+            only_home: launcher.only_home,
         };
 
-        options.icon_holder_overlay = Some(overlay);
+        let options = ImageReplacementElements { icon_holder_overlay: overlay };
 
-        return Some(AsyncLauncherTile {
+        return Some((AsyncLauncherTile {
             launcher,
-            result_item,
+            result_item: result_item.clone(),
             text_tile: None,
             image_replacement: Some(options),
             weather_tile: None,
             attrs,
-        });
+        }, result_item));
     }
 }

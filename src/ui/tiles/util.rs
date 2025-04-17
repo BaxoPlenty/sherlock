@@ -24,16 +24,7 @@ pub struct TextTileElements {
 }
 #[derive(Debug)]
 pub struct ImageReplacementElements {
-    pub _icon: Option<Image>,
-    pub icon_holder_overlay: Option<Overlay>,
-}
-impl ImageReplacementElements {
-    pub fn new() -> Self {
-        ImageReplacementElements {
-            _icon: None,
-            icon_holder_overlay: None,
-        }
-    }
+    pub icon_holder_overlay: Overlay,
 }
 #[derive(Debug)]
 pub struct WeatherTileElements {
@@ -237,6 +228,9 @@ impl SherlockSearch for String {
         Self: AsRef<str>,
         T: AsRef<str>,
     {
+        if self == "always-flag" {
+            return true;
+        };
         let char_pattern: HashSet<char> = substring.as_ref().chars().collect();
         let concat_str: String = self.chars().filter(|s| char_pattern.contains(s)).collect();
         concat_str.contains(substring.as_ref())

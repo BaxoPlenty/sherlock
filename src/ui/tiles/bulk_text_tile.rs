@@ -13,11 +13,12 @@ impl Tile {
         launcher: Launcher,
         keyword: &str,
         bulk_text: &BulkText,
-    ) -> Option<AsyncLauncherTile> {
+    ) -> Option<(AsyncLauncherTile, ResultItem)> {
         let builder = TileBuilder::new("/dev/skxxtz/sherlock/ui/bulk_text_tile.ui");
         builder.object.add_css_class("bulk-text");
         builder.object.set_spawn_focus(launcher.spawn_focus);
         builder.object.set_shortcut(launcher.shortcut);
+        builder.object.set_search(String::from("always-flag"));
 
         if let Some(name) = &launcher.name {
             builder.category.set_text(name);
@@ -39,18 +40,21 @@ impl Tile {
             priority: launcher.priority as f32,
             row_item: builder.object,
             shortcut_holder,
+            alias: launcher.alias.clone(),
+            home: launcher.home,
+            only_home: launcher.only_home,
         };
         let text_tile = Some(TextTileElements {
             title: builder.content_title,
             body: builder.content_body,
         });
-        return Some(AsyncLauncherTile {
+        return Some((AsyncLauncherTile {
             launcher,
-            result_item,
             text_tile,
+            result_item: result_item.clone(),
             image_replacement: None,
             weather_tile: None,
             attrs,
-        });
+        }, result_item));
     }
 }

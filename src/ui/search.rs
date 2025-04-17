@@ -8,15 +8,16 @@ use gtk4::{
 };
 use gtk4::{glib, ApplicationWindow, Entry};
 use gtk4::{Box as HVBox, Label, ListBox, ScrolledWindow};
+use simd_json::prelude::ArrayTrait;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use super::tiles::util::AsyncLauncherTile;
+use super::tiles::util::{AsyncLauncherTile, SherlockSearch};
 use super::util::*;
 use crate::actions::execute_from_attrs;
 use crate::g_subclasses::sherlock_row::SherlockRow;
-use crate::launcher::{construct_tiles, Launcher, ResultItem};
+use crate::launcher::{Launcher, ResultItem};
 use crate::CONFIG;
 
 #[allow(dead_code)]
@@ -53,13 +54,37 @@ pub fn search(
 
     let custom_binds = ConfKeys::new();
 
+
+
+    // Initialize all tiles
+    let (async_launchers, non_async_launchers): (Vec<Launcher>, Vec<Launcher>) = launchers
+        .clone()
+        .into_iter()
+        .partition(|launcher| launcher.r#async);
+    let mut patches: Vec<ResultItem> = non_async_launchers
+        .into_iter()
+        .map(|launcher| launcher.get_patch(""))
+        .flatten()
+        .collect();
+    // Get asynchronous loader tiles
+    let loaders: Vec<AsyncLauncherTile> = async_launchers
+        .into_iter()
+        .filter_map(|launcher| launcher.get_loader_widget(""))
+        .map(|(launcher, row)| {
+            patches.push(row);
+            launcher
+        })
+        .collect();
+    patches.sort_by(|a, b| a.priority.partial_cmp(&b.priority).unwrap());
+
     change_event(
         &ui.search_bar,
         modes,
         &mode,
-        &launchers,
         &results,
         &custom_binds,
+        loaders,
+        patches,
     );
     nav_event(
         &stack_page,
@@ -320,138 +345,108 @@ fn change_event(
     search_bar: &Entry,
     modes: HashMap<String, Option<String>>,
     mode: &Rc<RefCell<String>>,
-    launchers: &Vec<Launcher>,
     results: &Rc<ListBox>,
     custom_binds: &ConfKeys,
+    loaders: Vec<AsyncLauncherTile>,
+    patches: Vec<ResultItem>,
 ) {
     // Setting up async capabilities
     let current_task: Rc<RefCell<Option<glib::JoinHandle<()>>>> = Rc::new(RefCell::new(None));
-    let cancel_flag = Rc::new(RefCell::new(false));
 
     // vars
     let mod_str = custom_binds.shortcut_modifier_str.clone();
+    let async_launchers = Rc::new(loaders);
 
-    // Setting home screen
-    async_calc(
-        &cancel_flag,
-        &current_task,
-        &launchers,
-        &mode,
-        String::new(),
-        &results,
-        &mod_str,
-        true,
-    );
+    if let Some(c) = CONFIG.get() {
+        let mut shortcut_index = 1;
+        for widget in patches.iter() {
+            widget.row_item.set_visible(widget.home);
+            if c.behavior.animate {
+                widget.row_item.add_css_class("animate");
+            }
+            if let Some(shortcut_holder) = &widget.shortcut_holder {
+                shortcut_index += shortcut_holder.apply_shortcut(shortcut_index, &mod_str);
+            }
+            results.append(&widget.row_item);
+        }
+    }
+    async_calc(&async_launchers, &current_task, String::new());
+    results.focus_first();
+
+    let rc_patches: Rc<Vec<ResultItem>> = Rc::new(patches);
 
     search_bar.connect_changed({
-        let launchers_clone = launchers.clone();
+        let patches = Rc::clone(&rc_patches);
+        let results = Rc::clone(&results);
         let mode_clone = Rc::clone(mode);
-        let results_clone = Rc::clone(results);
-
         move |search_bar| {
             let mut current_text = search_bar.text().to_string();
             if current_text.len() == 1 && current_text != "\n" {
                 let _ = search_bar.activate_action("win.switch-mode", Some(&"search".to_variant()));
-            } else if current_text.len() == 0 && mode_clone.borrow().as_str() == "all" {
-                let _ = search_bar.activate_action("win.switch-mode", Some(&"all".to_variant()));
-            }
+            };
             if let Some(task) = current_task.borrow_mut().take() {
                 task.abort();
             };
-            *cancel_flag.borrow_mut() = true;
             let trimmed = current_text.trim();
             if !trimmed.is_empty() && modes.contains_key(&current_text) {
                 // Logic to apply modes
                 let _ = search_bar.activate_action("win.switch-mode", Some(&trimmed.to_variant()));
                 current_text.clear();
             }
-            async_calc(
-                &cancel_flag,
-                &current_task,
-                &launchers_clone,
-                &mode_clone,
-                current_text,
-                &results_clone,
-                &mod_str,
-                false,
-            );
+            // Update tile visibility
+            let current_mode = mode_clone.borrow().clone();
+            let current_mode = current_mode.trim();
+            let all = current_mode == "all";
+            if all {
+                if current_text.trim().is_empty() {
+                    patches.iter().for_each(|l| l.row_item.set_visible(l.home))
+                } else {
+                    patches
+                        .iter()
+                        .for_each(|r| {
+                            let visible = match r {
+                                r if r.only_home => false,
+                                r if r.priority == 0.0 => r.alias.as_deref() == Some(current_mode),
+                                r => r.row_item.get_search().fuzzy_match(&current_text)
+                            };
+                            r.row_item.set_visible(visible);
+                        });
+                }
+            } else {
+                patches
+                    .iter()
+                    .for_each(|r| r.row_item.set_visible(r.alias.as_deref() == Some(current_mode)));
+
+            }
+            results.focus_first();
         }
     });
 }
 
+/// Does the asynchronous retrieving and updating for async tiles. 
 pub fn async_calc(
-    cancel_flag: &Rc<RefCell<bool>>,
+    launchers: &Rc<Vec<AsyncLauncherTile>>,
     current_task: &Rc<RefCell<Option<glib::JoinHandle<()>>>>,
-    launchers: &[Launcher],
-    mode: &Rc<RefCell<String>>,
     current_text: String,
-    results: &Rc<ListBox>,
-    mod_str: &str,
-    animate: bool,
 ) {
-    *cancel_flag.borrow_mut() = false;
     // If task is currently running, abort it
     if let Some(t) = current_task.borrow_mut().take() {
         t.abort();
     };
-    let is_home = current_text.is_empty() && mode.borrow().as_str().trim() == "all";
-    let cancel_flag = Rc::clone(&cancel_flag);
-    let filtered_launchers: Vec<Launcher> = launchers
-        .iter()
-        .filter(|launcher| (is_home && launcher.home) || (!is_home && !launcher.only_home))
-        .cloned()
-        .collect();
-    let (async_launchers, non_async_launchers): (Vec<Launcher>, Vec<Launcher>) = filtered_launchers
-        .into_iter()
-        .partition(|launcher| launcher.r#async);
-
-    // Create loader widgets
-    // TODO
-    let current_mode_ref = mode.borrow();
-    let current_mode = current_mode_ref.trim();
-
-    // extract result items to reduce cloning
-    let mut async_widgets: Vec<ResultItem> = Vec::with_capacity(async_launchers.capacity());
-    let async_launchers: Vec<AsyncLauncherTile> = async_launchers
-        .into_iter()
-        .filter_map(|launcher| {
-            if (launcher.priority == 0 && current_mode == launcher.alias.as_deref().unwrap_or(""))
-                || (current_mode == "all" && launcher.priority > 0)
-            {
-                launcher.get_loader_widget(&current_text).map(|tile| {
-                    async_widgets.push(tile.result_item.clone());
-                    tile
-                })
-            } else {
-                None
-            }
-        })
-        .collect();
-    populate(
-        &current_text,
-        &mode.borrow(),
-        &*results,
-        &non_async_launchers,
-        Some(async_widgets),
-        animate,
-        mod_str,
-    );
 
     // Gather results for asynchronous widgets
     let task = glib::MainContext::default().spawn_local({
         let current_task_clone = Rc::clone(current_task);
+        let launchers = Rc::clone(&launchers);
         async move {
-            if *cancel_flag.borrow() {
-                return;
-            }
-            if let Some(row) = async_launchers.get(0) {
+            if let Some(row) = launchers.get(0) {
                 let _ = row
                     .result_item
                     .row_item
                     .activate_action("win.spinner-mode", Some(&true.to_variant()));
             }
             // Make them update concurrently
-            let futures: Vec<_> = async_launchers
+            let futures: Vec<_> = launchers
                 .iter()
                 .map(|widget| {
                     let widget_clone = widget;
@@ -477,18 +472,16 @@ pub fn async_calc(
 
                         // Process image replacement
                         if let Some(opts) = &widget_clone.image_replacement {
-                            if let Some(overlay) = &opts.icon_holder_overlay {
-                                if let Some((image, was_cached)) =
-                                    widget_clone.launcher.get_image().await
-                                {
-                                    if !was_cached {
-                                        overlay.add_css_class("image-replace-overlay");
-                                    }
-                                    let gtk_image = Image::from_pixbuf(Some(&image));
-                                    gtk_image.set_widget_name("album-cover");
-                                    gtk_image.set_pixel_size(50);
-                                    overlay.add_overlay(&gtk_image);
+                            if let Some((image, was_cached)) =
+                                widget_clone.launcher.get_image().await
+                            {
+                                if !was_cached {
+                                    opts.icon_holder_overlay.add_css_class("image-replace-overlay");
                                 }
+                                let gtk_image = Image::from_pixbuf(Some(&image));
+                                gtk_image.set_widget_name("album-cover");
+                                gtk_image.set_pixel_size(50);
+                                opts.icon_holder_overlay.add_overlay(&gtk_image);
                             }
                         }
 
@@ -529,7 +522,7 @@ pub fn async_calc(
 
             let _ = join_all(futures).await;
             // Set spinner inactive
-            if let Some(row) = async_launchers.get(0) {
+            if let Some(row) = launchers.get(0) {
                 let _ = row
                     .result_item
                     .row_item
@@ -541,37 +534,3 @@ pub fn async_calc(
     *current_task.borrow_mut() = Some(task);
 }
 
-pub fn populate(
-    keyword: &str,
-    mode: &str,
-    results_frame: &ListBox,
-    launchers: &Vec<Launcher>,
-    async_widgets: Option<Vec<ResultItem>>,
-    animate: bool,
-    mod_str: &str,
-) {
-    // Remove all elements inside to avoid duplicates
-    while let Some(row) = results_frame.last_child() {
-        results_frame.remove(&row);
-    }
-    let mut launcher_tiles = construct_tiles(&keyword.to_string(), &launchers, &mode.to_string());
-    if let Some(widgets) = async_widgets {
-        launcher_tiles.extend(widgets);
-    }
-
-    launcher_tiles.sort_by(|a, b| a.priority.partial_cmp(&b.priority).unwrap());
-
-    if let Some(c) = CONFIG.get() {
-        let mut shortcut_index = 1;
-        for widget in launcher_tiles {
-            if animate && c.behavior.animate {
-                widget.row_item.add_css_class("animate");
-            }
-            if let Some(shortcut_holder) = widget.shortcut_holder {
-                shortcut_index += shortcut_holder.apply_shortcut(shortcut_index, mod_str);
-            }
-            results_frame.append(&widget.row_item);
-        }
-    }
-    results_frame.focus_first();
-}

@@ -19,6 +19,12 @@ impl SherlockRow {
     pub fn set_shortcut(&self, shortcut: bool) {
         self.imp().shortcut.set(shortcut);
     }
+    pub fn set_search(&self, search: String) {
+        *self.imp().search.borrow_mut() = search;
+    }
+    pub fn get_search(&self) -> String {
+        self.imp().search.borrow().clone()
+    }
 }
 
 impl Default for SherlockRow {

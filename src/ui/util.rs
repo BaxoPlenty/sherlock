@@ -69,7 +69,7 @@ impl RowOperations for ListBox {
         for child in &self.observe_children() {
             if let Some(child) = child.ok() {
                 if let Some(row) = child.downcast_ref::<SherlockRow>() {
-                    if row.imp().spawn_focus.get() {
+                    if row.is_visible() && row.imp().spawn_focus.get() {
                         self.select_row(Some(row));
                         return;
                     }
@@ -79,12 +79,19 @@ impl RowOperations for ListBox {
     }
     fn select_offset_row(&self, offset: i32) -> ListBoxRow {
         if let Some(row) = self.selected_row() {
-            let new_index = row.index() + offset;
-            if let Some(new_row) = self.row_at_index(new_index) {
-                self.select_row(Some(&new_row));
-                return new_row;
-            };
-            return row;
+            let mut new_index = row.index() + offset;
+            while new_index >= 0 {
+                if let Some(new_row) = self.row_at_index(new_index) {
+                    if new_row.is_visible() {
+                        self.select_row(Some(&new_row));
+                        return new_row;
+                    } else {
+                        new_index += offset;
+                    }
+                } else {
+                    return row;
+                };
+            }
         };
         return ListBoxRow::new();
     }

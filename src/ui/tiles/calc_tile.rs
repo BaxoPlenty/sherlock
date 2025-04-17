@@ -62,6 +62,7 @@ impl Tile {
             builder.object.add_css_class("calc-tile");
             builder.object.set_spawn_focus(launcher.spawn_focus);
             builder.object.set_shortcut(launcher.shortcut);
+            builder.object.set_search(String::from("always-flag"));
 
             builder.equation_holder.set_text(&keyword);
             builder.result_holder.set_text(&r);
@@ -85,6 +86,9 @@ impl Tile {
                 priority: launcher.priority as f32,
                 row_item: builder.object,
                 shortcut_holder,
+                alias: launcher.alias.clone(),
+                home: launcher.home,
+                only_home: launcher.only_home,
             };
 
             vec![res]

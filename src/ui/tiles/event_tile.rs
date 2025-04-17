@@ -65,6 +65,9 @@ impl Tile {
             priority: launcher.priority as f32,
             row_item: builder.object,
             shortcut_holder,
+            alias: launcher.alias.clone(),
+            home: launcher.home,
+            only_home: launcher.only_home,
         };
         return vec![res];
     }

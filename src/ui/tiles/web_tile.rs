@@ -13,6 +13,7 @@ impl Tile {
         let builder = TileBuilder::new("/dev/skxxtz/sherlock/ui/tile.ui");
         builder.object.set_spawn_focus(launcher.spawn_focus);
         builder.object.set_shortcut(launcher.shortcut);
+        builder.object.set_search(String::from("always-flag"));
 
         if let Some(name) = &launcher.name {
             builder.category.set_text(name);
@@ -58,7 +59,11 @@ impl Tile {
             priority: launcher.priority as f32,
             row_item: builder.object,
             shortcut_holder,
+            alias: launcher.alias.clone(),
+            home: launcher.home,
+            only_home: launcher.only_home,
         };
+        println!("{:?}", res);
 
         return vec![res];
     }
